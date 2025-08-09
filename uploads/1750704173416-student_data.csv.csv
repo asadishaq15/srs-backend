@@ -1,0 +1,5 @@
+Student ID,First Name,Last Name,Grade,Section,Parent Name,Favorite Subject,Gender,DOB,Student Email,Phone,Address,Enrollment Date,Parent Name 2,Parent Email,Parent Phone,Photo File,Relationship,Parent Occupation
+STU001,John,Doe,10,A,John's Mom,Science,Male,2005-05-15,john.doe@example.com,5551234567,123 Main St,2024-08-01,Jane Doe,jane.doe@example.com,5552345678,photo1.jpg,Mother,Teacher
+STU002,Alice,Smith,9,B,Alice's Father,Math,Female,2006-03-22,alice.smith@example.com,5553456789,456 Oak Ave,2024-08-01,Robert Smith,robert.smith@example.com,5554567890,photo2.jpg,Father,Engineer
+STU003,Bob,Johnson,10,C,Bob's Mom,Science,Male,2005-09-30,bob.johnson@example.com,5555678901,789 Pine Rd,2024-08-01,Emily Johnson,emily.johnson@example.com,5556789012,photo3.jpg,Mother,Doctor
+STU004,Charlie,Brown,11,D,Charlie's Dad,Math,Male,2004-02-14,charlie.brown@example.com,5556789013,101 Maple Blvd,2023-08-01,Daniel Brown,daniel.brown@example.com,5557890123,photo4.jpg,Father,Artist
