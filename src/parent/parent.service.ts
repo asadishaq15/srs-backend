@@ -26,10 +26,7 @@ export class ParentService {
   async getChildrenFull(parentId: string): Promise<Student[]> {
     const parent = await this.parentModel
       .findById(parentId)
-      .populate({
-        path: 'children',
-        populate: { path: 'guardian' }, // Ensure guardian is populated
-      })
+      .populate('children')  // <-- Only this!
       .exec();
     return (parent?.children as unknown as Student[]) || [];
   }

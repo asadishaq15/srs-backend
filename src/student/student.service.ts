@@ -1,25 +1,22 @@
 import { HttpStatus, Injectable, NotFoundException } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
+import { InjectModel, InjectConnection } from '@nestjs/mongoose';
 import { Model, Types, Connection, ClientSession } from 'mongoose';
 import * as bcrypt from 'bcrypt';
 import { Student } from './schema/student.schema';
 import { CreateStudentDto } from './dto/create-student.dto';
-import { GuardianService } from '../guardian/guardian.service';
 import { UpdateStudentDto } from './dto/update-student.dto';
 import * as XLSX from 'xlsx';
-import { Guardian } from '../guardian/schema/guardian.schema';
 import { ResponseDto } from 'src/dto/response.dto';
 import { Attendance } from '../attendance/schema/schema.attendance';
 import { Course } from 'src/course/schema/course.schema';
+import { Parent } from '../parent/schema/parent.schema';
 import { UploadedFileType } from 'utils/multer.config';
-import { InjectConnection } from '@nestjs/mongoose';
 
 @Injectable()
 export class StudentService {
   constructor(
     @InjectModel(Student.name) private studentModel: Model<Student>,
-    private readonly guardianService: GuardianService,
-    @InjectModel(Guardian.name) private guardianModel: Model<Guardian>,
+    @InjectModel(Parent.name) private parentModel: Model<Parent>,
     @InjectModel(Attendance.name) private attendanceModel: Model<Attendance>,
     @InjectModel(Course.name) private courseModel: Model<Course>,
     @InjectConnection() private readonly connection: Connection,
@@ -43,8 +40,6 @@ export class StudentService {
       const sheetName = workbook.SheetNames[0];
       const sheet = workbook.Sheets[sheetName];
       const rows: any[] = XLSX.utils.sheet_to_json(sheet);
-
-      console.log(rows);
 
       const BATCH_SIZE = 100;
       let insertedCount = 0;
@@ -81,43 +76,34 @@ export class StudentService {
       return { insertedCount, skippedCount };
     }
 
-    const guardianData = validStudents.map((student) => ({
-      guardianName: student.guardianName,
-      guardianEmail: student.guardianEmail,
-      guardianPhone: student.guardianPhone,
-      guardianRelation: student.guardianRelation,
-      guardianProfession: student.guardianProfession,
-    }));
+    const studentsWithParents = [];
+    for (const student of validStudents) {
+      // parentId (or parentIds) must be present in the row
+      if (!student.parentIds || !Array.isArray(student.parentIds) || student.parentIds.length === 0) {
+        skippedCount++;
+        continue;
+      }
+      // Ensure all parents exist
+      let allParentsExist = true;
+      for (const parentId of student.parentIds) {
+        const parent = await this.parentModel.findById(parentId).session(session);
+        if (!parent) {
+          allParentsExist = false;
+          break;
+        }
+      }
+      if (!allParentsExist) {
+        skippedCount++;
+        continue;
+      }
+      studentsWithParents.push({
+        ...student,
+        parents: student.parentIds,
+      });
+    }
 
-    const guardianIds = await this.upsertGuardians(guardianData, session);
-
-    const studentsWithGuardians = validStudents.map((student, index) => ({
-      studentId: student.studentId,
-      firstName: student.firstName,
-      lastName: student.lastName,
-      class: student.class,
-      section: student.section,
-      gender: student.gender,
-      dob: student.dob,
-      email: student.email,
-      phone: student.phone,
-      address: student.address,
-      emergencyContact: student.emergencyContact,
-      enrollDate: student.enrollDate,
-      expectedGraduation: student.expectedGraduation,
-      guardian: guardianIds[index],
-      profilePhoto: 'N/A',
-      transcripts: [],
-      iipFlag: false,
-      honorRolls: false,
-      athletics: false,
-      clubs: '',
-      lunch: '',
-      nationality: '',
-    }));
-
-    await this.studentModel.insertMany(studentsWithGuardians, { session });
-    insertedCount += studentsWithGuardians.length;
+    await this.studentModel.insertMany(studentsWithParents, { session });
+    insertedCount += studentsWithParents.length;
 
     return { insertedCount, skippedCount };
   }
@@ -127,26 +113,13 @@ export class StudentService {
     let skippedCount = 0;
 
     const studentEmails = rows.map((row) => row.email).filter(Boolean);
-    const guardianEmails = rows.map((row) => row.guardianEmail).filter(Boolean);
 
-    // Check for existing students and guardians in the database
-    const [existingStudents, existingGuardians] = await Promise.all([
-      this.studentModel
-        .find({ email: { $in: studentEmails } }, { email: 1 }, { session })
-        .lean(),
-      this.guardianModel
-        .find(
-          { guardianEmail: { $in: guardianEmails } },
-          { guardianEmail: 1 },
-          { session },
-        )
-        .lean(),
-    ]);
+    // Check for existing students in the database
+    const existingStudents = await this.studentModel
+      .find({ email: { $in: studentEmails } }, { email: 1 }, { session })
+      .lean();
 
     const existingStudentEmails = new Set(existingStudents.map((s) => s.email));
-    const existingGuardianEmails = new Set(
-      existingGuardians.map((g) => g.guardianEmail),
-    );
 
     for (const row of rows) {
       // Skip if student email exists
@@ -155,24 +128,14 @@ export class StudentService {
         continue;
       }
 
-      // Skip if guardian email exists
-      if (existingGuardianEmails.has(row.guardianEmail)) {
-        skippedCount++;
-        continue;
-      }
-
-      // Skip if student and guardian have same email
-      if (row.email === row.guardianEmail) {
-        skippedCount++;
-        continue;
-      }
-
       // Validate required fields
       if (
         !row.email ||
-        !row.guardianEmail ||
         !row.enrollDate ||
-        !row.studentId
+        !row.studentId ||
+        !row.parentIds || // should be an array of parent _id(s)
+        !Array.isArray(row.parentIds) ||
+        row.parentIds.length === 0
       ) {
         skippedCount++;
         continue;
@@ -192,11 +155,15 @@ export class StudentService {
         emergencyContact: row.emergencyContact,
         enrollDate: row.enrollDate,
         expectedGraduation: this.calculateGraduationDate(row.enrollDate),
-        guardianName: row.guardianName,
-        guardianEmail: row.guardianEmail,
-        guardianPhone: row.guardianPhone,
-        guardianRelation: row.guardianRelation,
-        guardianProfession: row.guardianProfession,
+        profilePhoto: 'N/A',
+        transcripts: [],
+        iipFlag: false,
+        honorRolls: false,
+        athletics: false,
+        clubs: '',
+        lunch: '',
+        nationality: '',
+        parentIds: row.parentIds, // should be an array of parent _id(s) as strings
       };
 
       validStudents.push(studentDto);
@@ -205,69 +172,34 @@ export class StudentService {
     return { validStudents, skipped: skippedCount };
   }
 
-  private async upsertGuardians(guardians: any[], session: ClientSession) {
-    if (guardians.length === 0) return [];
-
-    const bulkOps = guardians.map((guardian) => ({
-      updateOne: {
-        filter: { guardianEmail: guardian.guardianEmail },
-        update: {
-          $setOnInsert: {
-            guardianName: guardian.guardianName,
-            guardianEmail: guardian.guardianEmail,
-            guardianPhone: guardian.guardianPhone,
-            guardianRelation: guardian.guardianRelation,
-            guardianProfession: guardian.guardianProfession,
-            guardianPhoto: 'N/A',
-            password:
-              '$2b$10$1VlR8HWa.Pzyo96BdwL0H.3Hdp2WF9oRX1W9lEF4EohpCWbq70jKm',
-          },
-        },
-        upsert: true,
-      },
-    }));
-
-    await this.guardianModel.bulkWrite(bulkOps, { session });
-
-    const guardianEmails = guardians.map((g) => g.guardianEmail);
-    const guardianDocs = await this.guardianModel
-      .find(
-        { guardianEmail: { $in: guardianEmails } },
-        { _id: 1, guardianEmail: 1 },
-        { session },
-      )
-      .lean();
-
-    const emailToIdMap = new Map(
-      guardianDocs.map((g) => [g.guardianEmail, g._id]),
-    );
-    return guardians.map((g) => emailToIdMap.get(g.guardianEmail));
-  }
-
   async findByStudentId(studentId: string): Promise<Student> {
     return this.studentModel.findOne({ studentId }).exec();
   }
-  
+
   async create(
     createStudentDto: CreateStudentDto,
   ): Promise<Student | ResponseDto> {
     const {
-      guardianName,
-      guardianEmail,
-      guardianPhone,
-      guardianRelation,
-      guardianPhoto,
-      guardianProfession,
       studentId,
       email,
+      parents,
       ...studentData
     } = createStudentDto;
 
-    if (guardianEmail === email) {
+    if (!parents || parents.length === 0) {
       return {
-        status: HttpStatus.CONFLICT,
-        msg: `The student's email cannot be the same as the guardian's email.`,
+        status: HttpStatus.BAD_REQUEST,
+        msg: `At least one parent must be provided for the student.`,
       };
+    }
+    for (const parentId of parents) {
+      const parent = await this.parentModel.findById(parentId);
+      if (!parent) {
+        return {
+          status: HttpStatus.BAD_REQUEST,
+          msg: `Parent with ID "${parentId}" does not exist.`,
+        };
+      }
     }
 
     // Check if studentId already exists
@@ -290,92 +222,72 @@ export class StudentService {
       };
     }
 
-    // Check if guardian email already exists
-    const existingGuardianByEmail = await this.guardianModel.findOne({
-      guardianEmail,
-    });
-    if (existingGuardianByEmail) {
-      return {
-        status: HttpStatus.CONFLICT,
-        msg: `Guardian email "${guardianEmail}" is already registered`,
-      };
-    }
-
-    // Create Guardian First
-    const guardian = await this.guardianService.create({
-      guardianName,
-      guardianEmail,
-      guardianPhone,
-      guardianPhoto,
-      guardianRelation,
-      guardianProfession,
-    });
-
     // Hash password (default: 123)
     const hashedPassword = await bcrypt.hash('123', 10);
 
-    // Create Student with Guardian ID
+    // Create Student with Parent IDs
     const student = new this.studentModel({
       ...studentData,
       studentId,
       email,
       password: hashedPassword,
-      guardian: guardian._id,
+      parents,
     });
 
     return student.save();
   }
 
-/**
- * Returns daily attendance records for a student.
- * Each record: { date, status, courseName, checkInTime?, checkOutTime?, reason? }
- */
-async getDailyAttendanceForStudent(studentId: string) {
-  const objectId = new Types.ObjectId(studentId);
+  /**
+   * Returns daily attendance records for a student.
+   * Each record: { date, status, courseName, checkInTime?, checkOutTime?, reason? }
+   */
+  async getDailyAttendanceForStudent(studentId: string) {
+    const objectId = new Types.ObjectId(studentId);
 
-  // 1. Find all attendance records for this student in any course
-  const attendanceRecords = await this.attendanceModel
-    .find({ 'students._id': objectId })
-    .populate('courseId', 'courseName')
-    .select('courseId date students')
-    .lean();
+    // 1. Find all attendance records for this student in any course
+    const attendanceRecords = await this.attendanceModel
+      .find({ 'students._id': objectId })
+      .populate('courseId', 'courseName')
+      .select('courseId date students')
+      .lean();
 
-  // 2. Flatten all attendance entries into daily records
-  const all: Array<{
-    date: string;
-    status: string;
-    courseName: string;
-    checkInTime?: string;
-    checkOutTime?: string;
-    reason?: string;
-  }> = [];
+    // 2. Flatten all attendance entries into daily records
+    const all: Array<{
+      date: string;
+      status: string;
+      courseName: string;
+      checkInTime?: string;
+      checkOutTime?: string;
+      reason?: string;
+    }> = [];
 
-  for (const record of attendanceRecords) {
-    const courseName = record.courseId?.courseName || 'N/A';
-    const date = record.date;
-    const studentEntry = (record.students || []).find(
-      (s: any) => String(s._id) === String(studentId),
-    );
-    if (!studentEntry) continue;
+    for (const record of attendanceRecords) {
+      const courseName = record.courseId?.courseName || 'N/A';
+      const date = record.date;
+      const studentEntry = (record.students || []).find(
+        (s: any) => String(s._id) === String(studentId),
+      );
+      if (!studentEntry) continue;
 
-    all.push({
-      date,
-      status: studentEntry.attendance || 'N/A',
-      courseName,
-      checkInTime: studentEntry.checkInTime,
-      checkOutTime: studentEntry.checkOutTime,
-      reason: studentEntry.reason,
-    });
+      all.push({
+        date,
+        status: studentEntry.attendance || 'N/A',
+        courseName,
+        checkInTime: studentEntry.checkInTime,
+        checkOutTime: studentEntry.checkOutTime,
+        reason: studentEntry.reason,
+      });
+    }
+
+    // (Optional) You may want to group multiple courses per day and decide how to show status (e.g. "Absent" if any course is absent).
+    // For simplicity, just return all records as-is.
+    return all;
   }
 
-  // (Optional) You may want to group multiple courses per day and decide how to show status (e.g. "Absent" if any course is absent).
-  // For simplicity, just return all records as-is.
-  return all;
-}
-  
   async findById(id: string): Promise<Student> {
     return this.studentModel.findById(id).exec();
   }
+
   async findAll(
     page = 1,
     limit = 10,
@@ -410,7 +322,7 @@ async getDailyAttendanceForStudent(studentId: string) {
     const totalRecordsCount = await this.studentModel.countDocuments(filter);
     const students = await this.studentModel
       .find(filter, '-password -updatedAt') // Exclude password and updatedAt fields
-      .populate('guardian')
+      .populate('parents')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
@@ -427,43 +339,34 @@ async getDailyAttendanceForStudent(studentId: string) {
 
   async studentCount(className: string, section: string) {
     try {
-      console.log('className', className);
-      console.log('section', section);
       const count = await this.studentModel.countDocuments({
         class: className,
         section: section,
       });
-      console.log('ount', count)
       return count;
     } catch (error) {
       console.error('Error fetching student count:', error);
-      return 0; // or throw error if you want the caller to handle it
+      return 0;
     }
   }
 
   async findOne(id: string): Promise<Student> {
     return this.studentModel
-      .findById(id, '-password -updatedAt') // Exclude password and updatedAt fields
-      .populate('guardian')
+      .findById(id, '-password -updatedAt')
+      .populate('parents')
       .exec();
   }
 
   async delete(id: string): Promise<{ message: string }> {
-    const student = await this.studentModel
-      .findById(id)
-      .populate('guardian')
-      .exec();
+    const student = await this.studentModel.findById(id).exec();
     if (!student) {
       throw new NotFoundException(`Student with ID "${id}" not found.`);
     }
 
-    // Delete the associated guardian
-    await this.guardianService.delete(student.guardian._id.toString());
-
-    // Delete the student
+    // No more guardian deletion
     await this.studentModel.findByIdAndDelete(id);
 
-    return { message: 'Student and associated guardian deleted successfully.' };
+    return { message: 'Student deleted successfully.' };
   }
 
   async update(
@@ -475,30 +378,26 @@ async getDailyAttendanceForStudent(studentId: string) {
       throw new NotFoundException(`Student with ID "${id}" not found.`);
     }
 
-    const {
-      guardianName,
-      guardianEmail,
-      guardianPhone,
-      guardianRelation,
-      guardianPhoto,
-      guardianProfession,
-      ...studentData
-    } = updateStudentDto;
+    // Only update parent if provided
+    const { parents, ...studentData } = updateStudentDto;
 
-    // Update Guardian details
-    await this.guardianService.update(student.guardian.toString(), {
-      guardianName,
-      guardianEmail,
-      guardianPhone,
-      guardianRelation,
-      guardianPhoto,
-      guardianProfession,
-    });
+    if (parents && parents.length > 0) {
+      for (const parentId of parents) {
+        const parent = await this.parentModel.findById(parentId);
+        if (!parent) {
+          throw new NotFoundException(`Parent with ID "${parentId}" not found.`);
+        }
+      }
+      // convert string[] to Types.ObjectId[]
+      student.parents = parents.map(id => new Types.ObjectId(id));
+    }
 
-    // Update Student details
+    Object.assign(student, studentData);
+    await student.save();
+
     return this.studentModel
-      .findByIdAndUpdate(id, studentData, { new: true })
-      .populate('guardian');
+      .findById(id)
+      .populate('parents');
   }
 
   async getAttendanceByStudentId(studentObjectId: string) {
@@ -554,24 +453,12 @@ async getDailyAttendanceForStudent(studentId: string) {
     courseCode: string,
     studentId: string,
   ) {
-    // Step 1: Find the course by code
-    console.log(courseCode);
-    console.log(studentId);
-
-    const courseId = new Types.ObjectId(courseCode);
     const course = await this.courseModel.findOne({ _id: courseCode });
-
-    console.log(
-      courseCode,
-      'is course id ka aaginst ya course aia ha ',
-      course,
-    );
 
     if (!course) {
       throw new NotFoundException(`Course with code ${courseCode} not found`);
     }
 
-    // Step 2: Find attendance entries for this course and student
     const attendanceRecords = await this.attendanceModel
       .find({
         courseId: course._id,
@@ -579,7 +466,6 @@ async getDailyAttendanceForStudent(studentId: string) {
       })
       .select('date students');
 
-    // Step 3: Extract only the relevant student's attendance per date
     const attendanceData = attendanceRecords.map((record) => {
       const student = record.students.find((s: any) =>
         new Types.ObjectId(s._id).equals(studentId),
@@ -590,7 +476,6 @@ async getDailyAttendanceForStudent(studentId: string) {
       };
     });
 
-    // Step 4: Return course code first, then attendance records
     return [{ courseCode: course.courseCode }, ...attendanceData];
   }
 

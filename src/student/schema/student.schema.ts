@@ -1,6 +1,8 @@
+// srs-nest-main/src/student/schema/student.schema.ts
+
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
-import { Guardian } from '../../guardian/schema/guardian.schema';
+import { Parent } from '../../parent/schema/parent.schema';
 
 @Schema({ timestamps: true })
 export class Student extends Document {
@@ -48,8 +50,8 @@ export class Student extends Document {
   })
   password: string; // Hashed password
 
-  @Prop({ type: Types.ObjectId, ref: 'Guardian', required: false })
-  guardian: Guardian;
+  @Prop({ type: [{ type: Types.ObjectId, ref: 'Parent' }], required: false, default: [] })
+  parents: (Parent | Types.ObjectId)[];
 
   @Prop({ required: true, default: 'N/A' })
   profilePhoto: string; // Store URL of the photo
@@ -70,7 +72,7 @@ export class Student extends Document {
   clubs: string; // Clubs participation
 
   @Prop({ type: [String], required: false, default: [] })
-reportCards: string[]; 
+  reportCards: string[]; 
 
   @Prop({ required: false })
   lunch: string; // Lunch preference

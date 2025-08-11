@@ -11,6 +11,7 @@ import {
   UploadedFile,
   BadRequestException,
   HttpStatus,
+  Inject,
 } from '@nestjs/common';
 import { StudentService } from './student.service';
 import { CreateStudentDto } from './dto/create-student.dto';
@@ -20,6 +21,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { multerOptionsForXlxs, UploadedFileType } from 'utils/multer.config';
 import { ResponseDto } from 'src/dto/response.dto';
 import * as fs from 'fs';
+import { AssignmentService } from 'src/assignment/assignment.service';
 @Controller('student')
 export class StudentController {
   constructor(private readonly studentService: StudentService) {}
@@ -122,9 +124,12 @@ async getReportCards(@Param('id') studentId: string) {
 
   @Get(':id')
   async findOne(@Param('id') id: string): Promise<Student> {
-    return this.studentService.findOne(id);
+    return this.studentService.findOne(id); // <-- Make sure!
   }
-
+  @Get(':id/assignments')
+  async getAssignments(@Param('id') id: string, @Inject(AssignmentService) assignmentService: AssignmentService) {
+    return assignmentService.findByStudent(id);
+  }
   @Delete(':id')
   async delete(@Param('id') id: string) {
     return this.studentService.delete(id);

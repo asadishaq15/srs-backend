@@ -1,3 +1,5 @@
+// srs-nest-main/src/student/dto/create-student.dto.ts
+
 import {
   IsEmail,
   IsNotEmpty,
@@ -5,6 +7,7 @@ import {
   IsDate,
   IsOptional,
   IsBoolean,
+  IsArray,
 } from 'class-validator';
 
 export class CreateStudentDto {
@@ -60,31 +63,11 @@ export class CreateStudentDto {
   @IsDate()
   expectedGraduation: string;
 
-  @IsNotEmpty()
-  @IsString()
-  guardianName: string;
+  @IsOptional()
+  @IsArray()
+  parents?: string[]; // Array of parent _id(s)
 
   @IsNotEmpty()
-  @IsEmail()
-  guardianEmail: string;
-
-  @IsNotEmpty()
-  @IsString()
-  guardianPhone: string;
-
-  // @IsNotEmpty()
-  @IsString()
-  guardianPhoto: string;
-
-  @IsNotEmpty()
-  @IsString()
-  guardianRelation: string;
-
-  @IsNotEmpty()
-  @IsString()
-  guardianProfession: string;
-
-  // @IsNotEmpty()
   @IsString()
   profilePhoto: string;
 

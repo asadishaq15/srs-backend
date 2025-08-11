@@ -17,6 +17,8 @@ import { GradeModule } from './grade/grade.module';
 import { UserModule } from './user/user.module';
 import { AwsModule } from './aws/aws.module';
 import { ParentModule } from './parent/parent.module';
+import { AssignmentModule } from './assignment/assignment.module';
+import { BehaviorModule } from './behavior/behavior.module';
 
 
 @Module({
@@ -39,6 +41,8 @@ import { ParentModule } from './parent/parent.module';
     UserModule,
     AwsModule,
     ParentModule,
+    AssignmentModule,
+    BehaviorModule,
   ],
   controllers: [AppController],
   providers: [AppService],
