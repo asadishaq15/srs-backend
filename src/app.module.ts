@@ -19,6 +19,8 @@ import { AwsModule } from './aws/aws.module';
 import { ParentModule } from './parent/parent.module';
 import { AssignmentModule } from './assignment/assignment.module';
 import { BehaviorModule } from './behavior/behavior.module';
+import { DocumentModule } from './document/document.module';
+import { AbsenceModule } from './absence/absence.module';
 
 
 @Module({
@@ -43,6 +45,8 @@ import { BehaviorModule } from './behavior/behavior.module';
     ParentModule,
     AssignmentModule,
     BehaviorModule,
+    DocumentModule,
+    AbsenceModule
   ],
   controllers: [AppController],
   providers: [AppService],
